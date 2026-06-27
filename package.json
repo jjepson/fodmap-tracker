@@ -1,0 +1,11 @@
+{
+  "name": "fodmap-tracker",
+  "version": "6.1.0",
+  "description": "Low FODMAP meal tracker with symptom logging",
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "jest": "^29.5.0"
+  }
+}
