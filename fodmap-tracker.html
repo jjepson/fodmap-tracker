@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="FODMAP" />
+  <title>Low FODMAP Tracker</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #f8f7f4; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+    #root { max-width: 520px; margin: 0 auto; }
+    input, select, textarea, button { font-family: inherit; }
+    ::-webkit-scrollbar { display: none; }
+    scrollbar-width: none;
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="text/babel">
+    const { useState, useMemo, useEffect } = React;
+
+
+// ─── FODMAP DATABASE ───────────────────────────────────────────────────────────
+// Each food has:
+//   serving: base serving description
+//   baseQty: numeric quantity at base serving
+//   unit: unit string for display
+//   score: FODMAP score AT base serving (0=low, 1=med, 2=high)
+//   thresholds: array of {maxQty, score} — sorted ascending
+//     e.g. [{maxQty:0.5, score:0},{maxQty:1, score:1},{maxQty:99,score:2}]
+//     means: ≤0.5 = green, ≤1 = yellow, >1 = red
+//   cal: calories at base serving
+//   note: short note about main FODMAP type
+
+const FODMAP_DB = [
+  // ── GRAINS & BREADS ──
+  { id:1,   name:"White rice (cooked)",           category:"Grains",         serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:186,  cal:242, note:"Safe at any amount",                thresholds:[{maxQty:99,score:0}] },
+  { id:2,   name:"Brown rice (cooked)",            category:"Grains",         serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:195,  cal:216, note:"Safe at any amount",                thresholds:[{maxQty:99,score:0}] },
+  { id:3,   name:"Oats (rolled, dry)",             category:"Grains",         serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:80,   cal:150, note:"Fructans increase with amount",     thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:4,   name:"Gluten-free pasta (cooked)",     category:"Grains",         serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:145,  cal:210, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:5,   name:"Rice noodles (cooked)",          category:"Grains",         serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:176,  cal:192, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:6,   name:"Soba noodles (cooked, 100% buckwheat)", category:"Grains", serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:170,  cal:113, note:"Safe if 100% buckwheat",            thresholds:[{maxQty:99,score:0}] },
+  { id:7,   name:"Sourdough spelt bread",          category:"Grains",         serving:"2 slices",     baseQty:2,    unit:"slice",   gramsPerNative:48,   cal:220, note:"Fermentation lowers fructans",      thresholds:[{maxQty:2,score:0},{maxQty:4,score:1},{maxQty:99,score:2}] },
+  { id:8,   name:"White bread (wheat)",            category:"Grains",         serving:"1 slice",      baseQty:1,    unit:"slice",   gramsPerNative:30,   cal:80,  note:"Fructans",                          thresholds:[{maxQty:1,score:0},{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:9,   name:"Whole wheat bread",              category:"Grains",         serving:"1 slice",      baseQty:1,    unit:"slice",   gramsPerNative:38,   cal:90,  note:"High fructans",                     thresholds:[{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:10,  name:"Gluten-free bread",              category:"Grains",         serving:"2 slices",     baseQty:2,    unit:"slice",   gramsPerNative:35,   cal:160, note:"Safe — check ingredients",          thresholds:[{maxQty:99,score:0}] },
+  { id:11,  name:"Cornflakes",                     category:"Grains",         serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:28,   cal:101, note:"Safe at 1 cup",                     thresholds:[{maxQty:1,score:0},{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:12,  name:"Rice Krispies",                  category:"Grains",         serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:29,   cal:108, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:13,  name:"Rice cakes (plain)",             category:"Grains",         serving:"2 cakes",      baseQty:2,    unit:"cake",    gramsPerNative:9,    cal:70,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:14,  name:"Quinoa (cooked)",                category:"Grains",         serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:185,  cal:222, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:15,  name:"Buckwheat groats (cooked)",      category:"Grains",         serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:84,   cal:77,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:16,  name:"Polenta (cooked)",               category:"Grains",         serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:240,  cal:145, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:17,  name:"Millet (cooked)",                category:"Grains",         serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:174,  cal:207, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:18,  name:"Wheat pasta (cooked)",           category:"Grains",         serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:140,  cal:220, note:"Fructans",                          thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:19,  name:"Wheat crackers",                 category:"Grains",         serving:"4 crackers",   baseQty:4,    unit:"cracker", gramsPerNative:7,    cal:70,  note:"Fructans",                          thresholds:[{maxQty:4,score:1},{maxQty:99,score:2}] },
+  { id:20,  name:"GF crackers (rice/corn)",        category:"Grains",         serving:"4 crackers",   baseQty:4,    unit:"cracker", gramsPerNative:8,    cal:65,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:21,  name:"Corn tortilla",                  category:"Grains",         serving:"2 tortillas",  baseQty:2,    unit:"tortilla",gramsPerNative:26,   cal:104, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:22,  name:"Wheat tortilla (small)",         category:"Grains",         serving:"1 tortilla",   baseQty:1,    unit:"tortilla",gramsPerNative:35,   cal:100, note:"Fructans",                          thresholds:[{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:23,  name:"Plain popcorn (air-popped)",     category:"Grains",         serving:"3 cups",       baseQty:3,    unit:"cup",     gramsPerNative:8,    cal:93,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:24,  name:"Corn chips (plain)",             category:"Grains",         serving:"1 oz",         baseQty:1,    unit:"oz",      gramsPerNative:28.35,cal:140, note:"Safe — check seasoning",           thresholds:[{maxQty:99,score:0}] },
+  { id:25,  name:"Potato chips (plain)",           category:"Grains",         serving:"1 oz",         baseQty:1,    unit:"oz",      gramsPerNative:28.35,cal:152, note:"Safe — check seasoning",           thresholds:[{maxQty:99,score:0}] },
+
+  // ── VEGETABLES ──
+  { id:30,  name:"Spinach (baby)",                 category:"Vegetables",     serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:30,   cal:7,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:31,  name:"Carrot",                         category:"Vegetables",     serving:"1 medium",     baseQty:1,    unit:"medium",  gramsPerNative:61,   cal:25,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:32,  name:"Zucchini / courgette",           category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:62,   cal:10,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:33,  name:"Bell pepper (red)",              category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:75,   cal:19,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:34,  name:"Bell pepper (green)",            category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:75,   cal:15,  note:"Moderate fructans at large amounts",thresholds:[{maxQty:1,score:0},{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:35,  name:"Bell pepper (yellow/orange)",    category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:75,   cal:24,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:36,  name:"Cucumber",                       category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:52,   cal:8,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:37,  name:"Tomato (common)",                category:"Vegetables",     serving:"1 medium",     baseQty:1,    unit:"medium",  gramsPerNative:123,  cal:22,  note:"Safe at 1, fructose at 3+",         thresholds:[{maxQty:1,score:0},{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:38,  name:"Cherry tomatoes",               category:"Vegetables",     serving:"5 tomatoes",   baseQty:5,    unit:"tomato",  gramsPerNative:17,   cal:15,  note:"Safe up to 5",                      thresholds:[{maxQty:5,score:0},{maxQty:10,score:1},{maxQty:99,score:2}] },
+  { id:39,  name:"Kale",                           category:"Vegetables",     serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:67,   cal:33,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:40,  name:"Bok choy",                       category:"Vegetables",     serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:70,   cal:9,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:41,  name:"Swiss chard",                    category:"Vegetables",     serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:36,   cal:7,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:42,  name:"Lettuce (iceberg/romaine)",      category:"Vegetables",     serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:47,   cal:8,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:43,  name:"Bean sprouts",                   category:"Vegetables",     serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:104,  cal:26,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:44,  name:"Corn (canned, rinsed)",          category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:82,   cal:66,  note:"Safe at ½ cup",                     thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:45,  name:"Potato (white, boiled)",         category:"Vegetables",     serving:"1 medium",     baseQty:1,    unit:"medium",  gramsPerNative:150,  cal:130, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:46,  name:"Sweet potato",                   category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:100,  cal:58,  note:"Mannitol increases with amount",    thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:47,  name:"Eggplant / aubergine",           category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:41,   cal:17,  note:"Safe at ½ cup",                     thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:48,  name:"Broccoli (florets)",             category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:45,   cal:27,  note:"Fructans increase with amount",     thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:49,  name:"Cauliflower",                    category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:50,   cal:14,  note:"High mannitol",                     thresholds:[{maxQty:0.25,score:0},{maxQty:0.5,score:1},{maxQty:99,score:2}] },
+  { id:50,  name:"Cabbage (common/green)",         category:"Vegetables",     serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:89,   cal:22,  note:"Safe at 1 cup",                     thresholds:[{maxQty:1,score:0},{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:51,  name:"Red cabbage",                    category:"Vegetables",     serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:70,   cal:22,  note:"Safe at 1 cup",                     thresholds:[{maxQty:1,score:0},{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:52,  name:"Brussels sprouts",               category:"Vegetables",     serving:"2 sprouts",    baseQty:2,    unit:"sprout",  gramsPerNative:21,   cal:18,  note:"GOS + fructans",                    thresholds:[{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:53,  name:"Onion (white/yellow/red)",       category:"Vegetables",     serving:"any amount",   baseQty:1,    unit:"tbsp",    gramsPerNative:10,   cal:4,   note:"Very high fructans — avoid",        thresholds:[{maxQty:99,score:2}] },
+  { id:54,  name:"Onion (green/scallion — tops only)", category:"Vegetables", serving:"¼ cup",       baseQty:0.25, unit:"cup",     gramsPerNative:25,   cal:8,   note:"Green tops only are safe",          thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:55,  name:"Shallot",                        category:"Vegetables",     serving:"any amount",   baseQty:1,    unit:"tbsp",    gramsPerNative:10,   cal:7,   note:"High fructans — avoid",             thresholds:[{maxQty:99,score:2}] },
+  { id:56,  name:"Garlic",                         category:"Vegetables",     serving:"1 clove",      baseQty:1,    unit:"clove",   gramsPerNative:3,    cal:4,   note:"Very high fructans — avoid",        thresholds:[{maxQty:99,score:2}] },
+  { id:57,  name:"Leek (green tips only)",         category:"Vegetables",     serving:"¼ cup",        baseQty:0.25, unit:"cup",     gramsPerNative:25,   cal:6,   note:"Tips only — white part is high",   thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:58,  name:"Asparagus",                      category:"Vegetables",     serving:"4 spears",     baseQty:4,    unit:"spear",   gramsPerNative:18,   cal:13,  note:"High fructans",                     thresholds:[{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:59,  name:"Mushrooms (button)",             category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:35,   cal:11,  note:"High mannitol",                     thresholds:[{maxQty:99,score:2}] },
+  { id:60,  name:"Oyster mushrooms",               category:"Vegetables",     serving:"¾ cup",        baseQty:0.75, unit:"cup",     gramsPerNative:40,   cal:24,  note:"Safe at this amount",               thresholds:[{maxQty:0.75,score:0},{maxQty:99,score:2}] },
+  { id:61,  name:"Artichoke",                      category:"Vegetables",     serving:"any amount",   baseQty:1,    unit:"piece",   gramsPerNative:120,  cal:25,  note:"Very high fructans — avoid",        thresholds:[{maxQty:99,score:2}] },
+  { id:62,  name:"Celery",                         category:"Vegetables",     serving:"1 stalk",      baseQty:1,    unit:"stalk",   gramsPerNative:40,   cal:6,   note:"Mannitol increases with amount",    thresholds:[{maxQty:1,score:0},{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:63,  name:"Peas (green, frozen)",           category:"Vegetables",     serving:"¼ cup",        baseQty:0.25, unit:"cup",     gramsPerNative:36,   cal:21,  note:"GOS + fructans",                    thresholds:[{maxQty:0.25,score:1},{maxQty:99,score:2}] },
+  { id:64,  name:"Snow peas / mangetout",          category:"Vegetables",     serving:"5 pods",       baseQty:5,    unit:"pod",     gramsPerNative:8,    cal:13,  note:"Safe at 5 pods",                    thresholds:[{maxQty:5,score:0},{maxQty:10,score:1},{maxQty:99,score:2}] },
+  { id:65,  name:"Green beans / string beans",     category:"Vegetables",     serving:"15 beans",     baseQty:15,   unit:"bean",    gramsPerNative:6,    cal:22,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:66,  name:"Pumpkin (canned)",               category:"Vegetables",     serving:"¼ cup",        baseQty:0.25, unit:"cup",     gramsPerNative:61,   cal:21,  note:"Safe at ¼ cup",                     thresholds:[{maxQty:0.25,score:0},{maxQty:0.5,score:1},{maxQty:99,score:2}] },
+  { id:67,  name:"Butternut squash",               category:"Vegetables",     serving:"¼ cup",        baseQty:0.25, unit:"cup",     gramsPerNative:70,   cal:16,  note:"Mannitol",                          thresholds:[{maxQty:0.25,score:0},{maxQty:0.5,score:1},{maxQty:99,score:2}] },
+  { id:68,  name:"Acorn squash",                   category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:71,   cal:28,  note:"Safe at ½ cup",                     thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:69,  name:"Beets / beetroot",               category:"Vegetables",     serving:"2 slices",     baseQty:2,    unit:"slice",   gramsPerNative:20,   cal:18,  note:"Moderate fructans",                 thresholds:[{maxQty:2,score:0},{maxQty:4,score:1},{maxQty:99,score:2}] },
+  { id:70,  name:"Radish",                         category:"Vegetables",     serving:"2 medium",     baseQty:2,    unit:"radish",  gramsPerNative:9,    cal:2,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:71,  name:"Turnip",                         category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:65,   cal:18,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:72,  name:"Parsnip",                        category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:67,   cal:50,  note:"Safe at ½ cup",                     thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:73,  name:"Fennel bulb",                    category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:44,   cal:13,  note:"Safe at ½ cup",                     thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:74,  name:"Watercress",                     category:"Vegetables",     serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:34,   cal:4,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:75,  name:"Arugula / rocket",               category:"Vegetables",     serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:20,   cal:5,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:76,  name:"Endive / chicory (leaves)",      category:"Vegetables",     serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:50,   cal:8,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:77,  name:"Bamboo shoots (canned)",         category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:76,   cal:12,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:78,  name:"Water chestnuts (canned)",       category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:90,   cal:35,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:79,  name:"Canned tomatoes (plain)",        category:"Vegetables",     serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:120,  cal:20,  note:"Safe at ½ cup",                     thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:80,  name:"Sun-dried tomatoes (in oil)",    category:"Vegetables",     serving:"4 pieces",     baseQty:4,    unit:"piece",   gramsPerNative:4,    cal:35,  note:"Moderate fructose",                 thresholds:[{maxQty:4,score:0},{maxQty:8,score:1},{maxQty:99,score:2}] },
+
+  // ── FRUITS ──
+  { id:100, name:"Banana (ripe)",                  category:"Fruits",         serving:"1 medium",     baseQty:1,    unit:"medium",  gramsPerNative:118,  cal:105, note:"Safe",                              thresholds:[{maxQty:1,score:0},{maxQty:1.5,score:1},{maxQty:99,score:2}] },
+  { id:101, name:"Banana (unripe/firm)",           category:"Fruits",         serving:"1 medium",     baseQty:1,    unit:"medium",  gramsPerNative:118,  cal:90,  note:"Lower FODMAP than ripe",            thresholds:[{maxQty:1,score:0},{maxQty:99,score:1}] },
+  { id:102, name:"Blueberries",                    category:"Fruits",         serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:74,   cal:42,  note:"Safe at ½ cup",                     thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:103, name:"Strawberries",                   category:"Fruits",         serving:"10 berries",   baseQty:10,   unit:"berry",   gramsPerNative:12,   cal:46,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:104, name:"Raspberries",                    category:"Fruits",         serving:"10 berries",   baseQty:10,   unit:"berry",   gramsPerNative:5,    cal:26,  note:"Safe at 10",                        thresholds:[{maxQty:10,score:0},{maxQty:20,score:1},{maxQty:99,score:2}] },
+  { id:105, name:"Grapes",                         category:"Fruits",         serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:80,   cal:52,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:106, name:"Kiwi",                           category:"Fruits",         serving:"2 small",      baseQty:2,    unit:"kiwi",    gramsPerNative:69,   cal:84,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:107, name:"Orange",                         category:"Fruits",         serving:"1 medium",     baseQty:1,    unit:"medium",  gramsPerNative:131,  cal:62,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:108, name:"Mandarin / clementine",          category:"Fruits",         serving:"2 small",      baseQty:2,    unit:"fruit",   gramsPerNative:75,   cal:70,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:109, name:"Pineapple",                      category:"Fruits",         serving:"1 cup chunks", baseQty:1,    unit:"cup",     gramsPerNative:165,  cal:82,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:110, name:"Papaya",                         category:"Fruits",         serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:145,  cal:55,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:111, name:"Cantaloupe / rockmelon",         category:"Fruits",         serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:80,   cal:27,  note:"Safe at ½ cup",                     thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:112, name:"Honeydew melon",                 category:"Fruits",         serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:89,   cal:32,  note:"Safe at ½ cup",                     thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:113, name:"Avocado",                        category:"Fruits",         serving:"⅛ avocado",    baseQty:0.125,unit:"avocado", gramsPerNative:200,  cal:40,  note:"Sorbitol increases with amount",    thresholds:[{maxQty:0.25,score:0},{maxQty:0.5,score:1},{maxQty:99,score:2}] },
+  { id:114, name:"Lemon juice",                    category:"Fruits",         serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:15,   cal:6,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:115, name:"Lime juice",                     category:"Fruits",         serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:15,   cal:5,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:116, name:"Apple",                          category:"Fruits",         serving:"1 medium",     baseQty:1,    unit:"medium",  gramsPerNative:182,  cal:95,  note:"High fructose + sorbitol",          thresholds:[{maxQty:99,score:2}] },
+  { id:117, name:"Pear",                           category:"Fruits",         serving:"1 medium",     baseQty:1,    unit:"medium",  gramsPerNative:178,  cal:101, note:"Very high sorbitol — avoid",        thresholds:[{maxQty:99,score:2}] },
+  { id:118, name:"Mango",                          category:"Fruits",         serving:"¼ cup",        baseQty:0.25, unit:"cup",     gramsPerNative:165,  cal:25,  note:"Fructose increases with amount",    thresholds:[{maxQty:0.25,score:0},{maxQty:0.5,score:1},{maxQty:99,score:2}] },
+  { id:119, name:"Watermelon",                     category:"Fruits",         serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:152,  cal:23,  note:"High fructose + mannitol",          thresholds:[{maxQty:99,score:2}] },
+  { id:120, name:"Peach",                          category:"Fruits",         serving:"1 small",      baseQty:1,    unit:"peach",   gramsPerNative:130,  cal:35,  note:"High fructose + sorbitol",          thresholds:[{maxQty:99,score:2}] },
+  { id:121, name:"Nectarine",                      category:"Fruits",         serving:"1 small",      baseQty:1,    unit:"fruit",   gramsPerNative:136,  cal:44,  note:"High sorbitol — avoid",             thresholds:[{maxQty:99,score:2}] },
+  { id:122, name:"Plum",                           category:"Fruits",         serving:"1 small",      baseQty:1,    unit:"plum",    gramsPerNative:66,   cal:30,  note:"High sorbitol — avoid",             thresholds:[{maxQty:99,score:2}] },
+  { id:123, name:"Cherries",                       category:"Fruits",         serving:"3 cherries",   baseQty:3,    unit:"cherry",  gramsPerNative:8,    cal:15,  note:"Sorbitol + fructose",               thresholds:[{maxQty:3,score:1},{maxQty:99,score:2}] },
+  { id:124, name:"Dried cranberries",              category:"Fruits",         serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:9,    cal:25,  note:"Safe at 1 tbsp",                    thresholds:[{maxQty:1,score:0},{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:125, name:"Raisins / sultanas",             category:"Fruits",         serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:9,    cal:27,  note:"Fructose — small amounts only",     thresholds:[{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:126, name:"Dates",                          category:"Fruits",         serving:"1 date",       baseQty:1,    unit:"date",    gramsPerNative:8,    cal:20,  note:"High fructose — avoid",             thresholds:[{maxQty:99,score:2}] },
+  { id:127, name:"Coconut (shredded, unsweetened)",category:"Fruits",         serving:"¼ cup",        baseQty:0.25, unit:"cup",     gramsPerNative:24,   cal:71,  note:"Safe at ¼ cup",                     thresholds:[{maxQty:0.25,score:0},{maxQty:0.5,score:1},{maxQty:99,score:2}] },
+  { id:128, name:"Passionfruit",                   category:"Fruits",         serving:"2 fruits",     baseQty:2,    unit:"fruit",   gramsPerNative:18,   cal:34,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:129, name:"Dragon fruit",                   category:"Fruits",         serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:150,  cal:60,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:130, name:"Guava",                          category:"Fruits",         serving:"1 medium",     baseQty:1,    unit:"medium",  gramsPerNative:55,   cal:37,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:131, name:"Jackfruit (canned in brine)",    category:"Fruits",         serving:"⅔ cup",        baseQty:0.67, unit:"cup",     gramsPerNative:80,   cal:40,  note:"Safe at this amount",               thresholds:[{maxQty:0.67,score:0},{maxQty:99,score:1}] },
+  { id:132, name:"Longan",                         category:"Fruits",         serving:"10 fruits",    baseQty:10,   unit:"fruit",   gramsPerNative:5,    cal:35,  note:"High fructose — avoid",             thresholds:[{maxQty:99,score:2}] },
+
+  // ── PROTEIN ──
+  { id:150, name:"Chicken breast (cooked)",        category:"Protein",        serving:"4 oz",         baseQty:4,    unit:"oz",      gramsPerNative:28.35,cal:187, note:"Safe — plain, no marinade",         thresholds:[{maxQty:99,score:0}] },
+  { id:151, name:"Chicken breast (raw)",           category:"Protein",        serving:"5 oz raw",     baseQty:5,    unit:"oz",      gramsPerNative:28.35,cal:156, note:"Raw ≈ 4 oz cooked",                 thresholds:[{maxQty:99,score:0}] },
+  { id:152, name:"Chicken thigh (cooked)",         category:"Protein",        serving:"4 oz",         baseQty:4,    unit:"oz",      gramsPerNative:28.35,cal:209, note:"Safe — plain, no marinade",         thresholds:[{maxQty:99,score:0}] },
+  { id:153, name:"Chicken thigh (raw)",            category:"Protein",        serving:"5 oz raw",     baseQty:5,    unit:"oz",      gramsPerNative:28.35,cal:175, note:"Raw ≈ 4 oz cooked",                 thresholds:[{maxQty:99,score:0}] },
+  { id:154, name:"Turkey breast (cooked)",         category:"Protein",        serving:"4 oz",         baseQty:4,    unit:"oz",      gramsPerNative:28.35,cal:153, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:155, name:"Turkey breast (raw)",            category:"Protein",        serving:"5 oz raw",     baseQty:5,    unit:"oz",      gramsPerNative:28.35,cal:120, note:"Raw ≈ 4 oz cooked",                 thresholds:[{maxQty:99,score:0}] },
+  { id:156, name:"Ground beef lean (cooked)",      category:"Protein",        serving:"4 oz",         baseQty:4,    unit:"oz",      gramsPerNative:28.35,cal:218, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:157, name:"Ground beef lean (raw)",         category:"Protein",        serving:"5 oz raw",     baseQty:5,    unit:"oz",      gramsPerNative:28.35,cal:195, note:"Raw ≈ 4 oz cooked",                 thresholds:[{maxQty:99,score:0}] },
+  { id:158, name:"Steak / beef (cooked)",          category:"Protein",        serving:"4 oz",         baseQty:4,    unit:"oz",      gramsPerNative:28.35,cal:271, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:159, name:"Steak / beef (raw)",             category:"Protein",        serving:"5 oz raw",     baseQty:5,    unit:"oz",      gramsPerNative:28.35,cal:225, note:"Raw ≈ 4 oz cooked",                 thresholds:[{maxQty:99,score:0}] },
+  { id:160, name:"Pork tenderloin (cooked)",       category:"Protein",        serving:"4 oz",         baseQty:4,    unit:"oz",      gramsPerNative:28.35,cal:136, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:161, name:"Pork tenderloin (raw)",          category:"Protein",        serving:"5 oz raw",     baseQty:5,    unit:"oz",      gramsPerNative:28.35,cal:120, note:"Raw ≈ 4 oz cooked",                 thresholds:[{maxQty:99,score:0}] },
+  { id:162, name:"Bacon (cooked)",                 category:"Protein",        serving:"2 strips",     baseQty:2,    unit:"strip",   gramsPerNative:8,    cal:86,  note:"Safe — plain, no seasoning",        thresholds:[{maxQty:99,score:0}] },
+  { id:163, name:"Ham (plain, deli)",              category:"Protein",        serving:"2 oz",         baseQty:2,    unit:"oz",      gramsPerNative:28.35,cal:60,  note:"Safe — avoid honey-glazed",         thresholds:[{maxQty:99,score:0}] },
+  { id:164, name:"Salmon (cooked)",                category:"Protein",        serving:"4 oz",         baseQty:4,    unit:"oz",      gramsPerNative:28.35,cal:236, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:165, name:"Salmon (raw/sushi)",             category:"Protein",        serving:"4 oz raw",     baseQty:4,    unit:"oz",      gramsPerNative:28.35,cal:161, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:166, name:"Tuna (canned in water)",         category:"Protein",        serving:"3 oz",         baseQty:3,    unit:"oz",      gramsPerNative:28.35,cal:73,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:167, name:"Shrimp (cooked)",                category:"Protein",        serving:"3 oz",         baseQty:3,    unit:"oz",      gramsPerNative:28.35,cal:84,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:168, name:"Shrimp (raw)",                   category:"Protein",        serving:"4 oz raw",     baseQty:4,    unit:"oz",      gramsPerNative:28.35,cal:90,  note:"Raw ≈ 3 oz cooked",                 thresholds:[{maxQty:99,score:0}] },
+  { id:169, name:"Cod / white fish (cooked)",      category:"Protein",        serving:"4 oz",         baseQty:4,    unit:"oz",      gramsPerNative:28.35,cal:119, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:170, name:"Tilapia (cooked)",               category:"Protein",        serving:"4 oz",         baseQty:4,    unit:"oz",      gramsPerNative:28.35,cal:145, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:171, name:"Scallops (cooked)",              category:"Protein",        serving:"3 oz",         baseQty:3,    unit:"oz",      gramsPerNative:28.35,cal:94,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:172, name:"Crab (cooked, plain)",           category:"Protein",        serving:"3 oz",         baseQty:3,    unit:"oz",      gramsPerNative:28.35,cal:82,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:173, name:"Lobster (cooked, plain)",        category:"Protein",        serving:"3 oz",         baseQty:3,    unit:"oz",      gramsPerNative:28.35,cal:83,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:174, name:"Eggs",                           category:"Protein",        serving:"2 large",      baseQty:2,    unit:"egg",     gramsPerNative:50,   cal:148, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:175, name:"Tofu (firm)",                    category:"Protein",        serving:"¾ cup",        baseQty:0.75, unit:"cup",     gramsPerNative:124,  cal:144, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:176, name:"Tofu (silken)",                  category:"Protein",        serving:"¼ cup",        baseQty:0.25, unit:"cup",     gramsPerNative:120,  cal:45,  note:"GOS at larger amounts",             thresholds:[{maxQty:0.25,score:0},{maxQty:0.5,score:1},{maxQty:99,score:2}] },
+  { id:177, name:"Tempeh",                         category:"Protein",        serving:"3 oz",         baseQty:3,    unit:"oz",      gramsPerNative:28.35,cal:162, note:"Safe — fermentation helps",         thresholds:[{maxQty:99,score:0}] },
+  { id:178, name:"Lentils (canned, rinsed)",       category:"Protein",        serving:"¼ cup",        baseQty:0.25, unit:"cup",     gramsPerNative:50,   cal:58,  note:"GOS + fructans",                    thresholds:[{maxQty:0.25,score:1},{maxQty:99,score:2}] },
+  { id:179, name:"Chickpeas (canned, rinsed)",     category:"Protein",        serving:"¼ cup",        baseQty:0.25, unit:"cup",     gramsPerNative:42,   cal:71,  note:"GOS + fructans",                    thresholds:[{maxQty:0.25,score:1},{maxQty:99,score:2}] },
+  { id:180, name:"Black beans",                    category:"Protein",        serving:"¼ cup",        baseQty:0.25, unit:"cup",     gramsPerNative:43,   cal:57,  note:"High GOS + fructans",               thresholds:[{maxQty:99,score:2}] },
+  { id:181, name:"Kidney beans",                   category:"Protein",        serving:"¼ cup",        baseQty:0.25, unit:"cup",     gramsPerNative:44,   cal:56,  note:"High GOS",                          thresholds:[{maxQty:99,score:2}] },
+  { id:182, name:"Edamame (shelled)",              category:"Protein",        serving:"¼ cup",        baseQty:0.25, unit:"cup",     gramsPerNative:38,   cal:47,  note:"GOS",                               thresholds:[{maxQty:0.25,score:1},{maxQty:99,score:2}] },
+  { id:183, name:"Beef jerky (plain)",             category:"Protein",        serving:"1 oz",         baseQty:1,    unit:"oz",      gramsPerNative:28.35,cal:116, note:"Safe — check for HFCS/garlic",      thresholds:[{maxQty:99,score:0}] },
+
+  // ── DAIRY & ALTERNATIVES ──
+  { id:200, name:"Lactose-free milk",              category:"Dairy & Alt",    serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:244,  cal:102, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:201, name:"Almond milk (unsweetened)",      category:"Dairy & Alt",    serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:244,  cal:30,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:202, name:"Rice milk",                      category:"Dairy & Alt",    serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:244,  cal:120, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:203, name:"Hemp milk (unsweetened)",        category:"Dairy & Alt",    serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:244,  cal:70,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:204, name:"Macadamia milk",                 category:"Dairy & Alt",    serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:244,  cal:50,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:205, name:"Oat milk",                       category:"Dairy & Alt",    serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:244,  cal:60,  note:"Fructans",                          thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:206, name:"Coconut milk (canned)",          category:"Dairy & Alt",    serving:"¼ cup",        baseQty:0.25, unit:"cup",     gramsPerNative:240,  cal:120, note:"Safe at ¼ cup",                     thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:207, name:"Coconut milk (carton/beverage)", category:"Dairy & Alt",    serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:244,  cal:45,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:208, name:"Coconut cream",                  category:"Dairy & Alt",    serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:30,   cal:70,  note:"Safe at 2 tbsp",                    thresholds:[{maxQty:2,score:0},{maxQty:4,score:1},{maxQty:99,score:2}] },
+  { id:209, name:"Soy milk (made from soy protein)",category:"Dairy & Alt",  serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:244,  cal:80,  note:"Safe — protein-based only",         thresholds:[{maxQty:99,score:0}] },
+  { id:210, name:"Soy milk (made from whole beans)",category:"Dairy & Alt",  serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:244,  cal:100, note:"High GOS — avoid whole-bean soy",   thresholds:[{maxQty:99,score:2}] },
+  { id:211, name:"Hard cheese (cheddar)",          category:"Dairy & Alt",    serving:"1.5 oz",       baseQty:1.5,  unit:"oz",      gramsPerNative:28.35,cal:170, note:"Very low lactose — safe",           thresholds:[{maxQty:99,score:0}] },
+  { id:212, name:"Parmesan",                       category:"Dairy & Alt",    serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:5,    cal:43,  note:"Very low lactose",                  thresholds:[{maxQty:99,score:0}] },
+  { id:213, name:"Brie / Camembert",               category:"Dairy & Alt",    serving:"1.5 oz",       baseQty:1.5,  unit:"oz",      gramsPerNative:28.35,cal:140, note:"Low lactose",                       thresholds:[{maxQty:99,score:0}] },
+  { id:214, name:"Feta cheese",                    category:"Dairy & Alt",    serving:"¼ cup",        baseQty:0.25, unit:"cup",     gramsPerNative:38,   cal:99,  note:"Low lactose",                       thresholds:[{maxQty:99,score:0}] },
+  { id:215, name:"Mozzarella (fresh)",             category:"Dairy & Alt",    serving:"1.5 oz",       baseQty:1.5,  unit:"oz",      gramsPerNative:28.35,cal:120, note:"Low lactose",                       thresholds:[{maxQty:99,score:0}] },
+  { id:216, name:"Swiss cheese",                   category:"Dairy & Alt",    serving:"1.5 oz",       baseQty:1.5,  unit:"oz",      gramsPerNative:28.35,cal:159, note:"Low lactose",                       thresholds:[{maxQty:99,score:0}] },
+  { id:217, name:"Goat cheese (hard)",             category:"Dairy & Alt",    serving:"1 oz",         baseQty:1,    unit:"oz",      gramsPerNative:28.35,cal:75,  note:"Low lactose",                       thresholds:[{maxQty:99,score:0}] },
+  { id:218, name:"Greek yogurt (plain)",           category:"Dairy & Alt",    serving:"¾ cup",        baseQty:0.75, unit:"cup",     gramsPerNative:240,  cal:100, note:"Low lactose",                       thresholds:[{maxQty:0.75,score:0},{maxQty:1.5,score:1},{maxQty:99,score:2}] },
+  { id:219, name:"Lactose-free yogurt",            category:"Dairy & Alt",    serving:"¾ cup",        baseQty:0.75, unit:"cup",     gramsPerNative:240,  cal:110, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:220, name:"Lactose-free sour cream",        category:"Dairy & Alt",    serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:12,   cal:40,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:221, name:"Butter",                         category:"Dairy & Alt",    serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:14,   cal:102, note:"Negligible lactose — safe",         thresholds:[{maxQty:99,score:0}] },
+  { id:222, name:"Ghee",                           category:"Dairy & Alt",    serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:13,   cal:112, note:"Lactose-free — safe",               thresholds:[{maxQty:99,score:0}] },
+  { id:223, name:"Regular milk (cow)",             category:"Dairy & Alt",    serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:244,  cal:150, note:"High lactose",                      thresholds:[{maxQty:99,score:2}] },
+  { id:224, name:"Sour cream (regular)",           category:"Dairy & Alt",    serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:12,   cal:60,  note:"Moderate lactose",                  thresholds:[{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:225, name:"Cream cheese",                   category:"Dairy & Alt",    serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:14,   cal:97,  note:"Moderate lactose",                  thresholds:[{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:226, name:"Ice cream (regular)",            category:"Dairy & Alt",    serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:66,   cal:137, note:"High lactose",                      thresholds:[{maxQty:99,score:2}] },
+  { id:227, name:"Lactose-free ice cream",         category:"Dairy & Alt",    serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:66,   cal:130, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:228, name:"Whipped cream (plain)",          category:"Dairy & Alt",    serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:8,    cal:52,  note:"Low lactose — safe at this amount", thresholds:[{maxQty:2,score:0},{maxQty:4,score:1},{maxQty:99,score:2}] },
+
+  // ── NUTS & SEEDS ──
+  { id:240, name:"Almonds",                        category:"Nuts & Seeds",   serving:"10 nuts",      baseQty:10,   unit:"nut",     gramsPerNative:1.2,  cal:70,  note:"GOS at larger amounts",             thresholds:[{maxQty:10,score:0},{maxQty:20,score:1},{maxQty:99,score:2}] },
+  { id:241, name:"Walnuts",                        category:"Nuts & Seeds",   serving:"10 halves",    baseQty:10,   unit:"half",    gramsPerNative:3,    cal:196, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:242, name:"Macadamia nuts",                 category:"Nuts & Seeds",   serving:"20 nuts",      baseQty:20,   unit:"nut",     gramsPerNative:1.5,  cal:204, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:243, name:"Pecans",                         category:"Nuts & Seeds",   serving:"10 halves",    baseQty:10,   unit:"half",    gramsPerNative:3,    cal:196, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:244, name:"Peanuts",                        category:"Nuts & Seeds",   serving:"32 nuts",      baseQty:32,   unit:"nut",     gramsPerNative:0.9,  cal:166, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:245, name:"Brazil nuts",                    category:"Nuts & Seeds",   serving:"10 nuts",      baseQty:10,   unit:"nut",     gramsPerNative:3.5,  cal:184, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:246, name:"Hazelnuts",                      category:"Nuts & Seeds",   serving:"10 nuts",      baseQty:10,   unit:"nut",     gramsPerNative:1.5,  cal:88,  note:"Safe at 10",                        thresholds:[{maxQty:10,score:0},{maxQty:20,score:1},{maxQty:99,score:2}] },
+  { id:247, name:"Pine nuts",                      category:"Nuts & Seeds",   serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:9,    cal:58,  note:"Safe at 1 tbsp",                    thresholds:[{maxQty:1,score:0},{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:248, name:"Pumpkin seeds",                  category:"Nuts & Seeds",   serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:9,    cal:74,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:249, name:"Sunflower seeds",                category:"Nuts & Seeds",   serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:9,    cal:93,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:250, name:"Chia seeds",                     category:"Nuts & Seeds",   serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:10,   cal:138, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:251, name:"Flaxseeds (ground)",             category:"Nuts & Seeds",   serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:7,    cal:37,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:252, name:"Sesame seeds",                   category:"Nuts & Seeds",   serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:9,    cal:52,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:253, name:"Hemp seeds",                     category:"Nuts & Seeds",   serving:"3 tbsp",       baseQty:3,    unit:"tbsp",    gramsPerNative:10,   cal:166, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:254, name:"Cashews",                        category:"Nuts & Seeds",   serving:"10 nuts",      baseQty:10,   unit:"nut",     gramsPerNative:1.4,  cal:157, note:"High GOS + fructans",               thresholds:[{maxQty:99,score:2}] },
+  { id:255, name:"Pistachios",                     category:"Nuts & Seeds",   serving:"10 nuts",      baseQty:10,   unit:"nut",     gramsPerNative:1.2,  cal:79,  note:"High fructans + GOS",               thresholds:[{maxQty:99,score:2}] },
+
+  // ── CONDIMENTS & SAUCES ──
+  { id:270, name:"Olive oil",                      category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:14,   cal:119, note:"Safe — no FODMAPs in oil",          thresholds:[{maxQty:99,score:0}] },
+  { id:271, name:"Garlic-infused oil",             category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:14,   cal:120, note:"Safe — FODMAPs don't transfer to oil", thresholds:[{maxQty:99,score:0}] },
+  { id:272, name:"Tamari / GF soy sauce",          category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:18,   cal:11,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:273, name:"Regular soy sauce",              category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:18,   cal:11,  note:"Safe at 2 tbsp",                    thresholds:[{maxQty:2,score:0},{maxQty:4,score:1},{maxQty:99,score:2}] },
+  { id:274, name:"Fish sauce",                     category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:18,   cal:6,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:275, name:"Oyster sauce",                   category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:18,   cal:18,  note:"Moderate — fructose + wheat",       thresholds:[{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:276, name:"Maple syrup",                    category:"Condiments",     serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:20,   cal:104, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:277, name:"White sugar",                    category:"Condiments",     serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:4,    cal:16,  note:"Safe — glucose:fructose 1:1",       thresholds:[{maxQty:99,score:0}] },
+  { id:278, name:"Brown sugar",                    category:"Condiments",     serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:4,    cal:17,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:279, name:"Rice wine vinegar",              category:"Condiments",     serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:30,   cal:6,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:280, name:"Apple cider vinegar",            category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:15,   cal:3,   note:"Safe at 1 tbsp",                    thresholds:[{maxQty:1,score:0},{maxQty:3,score:1},{maxQty:99,score:2}] },
+  { id:281, name:"Balsamic vinegar",               category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:16,   cal:14,  note:"Moderate fructose",                 thresholds:[{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:282, name:"Mustard (plain/Dijon)",          category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:15,   cal:9,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:283, name:"Mayonnaise (plain)",             category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:15,   cal:94,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:284, name:"Peanut butter (plain)",          category:"Condiments",     serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:16,   cal:188, note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:285, name:"Almond butter",                  category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:16,   cal:98,  note:"Safe at 1 tbsp",                    thresholds:[{maxQty:1,score:0},{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:286, name:"Ketchup",                        category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:17,   cal:17,  note:"Fructose",                          thresholds:[{maxQty:1,score:0},{maxQty:3,score:1},{maxQty:99,score:2}] },
+  { id:287, name:"BBQ sauce",                      category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:17,   cal:29,  note:"Fructose + onion/garlic",           thresholds:[{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:288, name:"Honey",                          category:"Condiments",     serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:7,    cal:21,  note:"High excess fructose — avoid",      thresholds:[{maxQty:99,score:2}] },
+  { id:289, name:"Hummus",                         category:"Condiments",     serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:30,   cal:70,  note:"High GOS from chickpeas",           thresholds:[{maxQty:99,score:2}] },
+  { id:290, name:"Salsa (plain tomato)",           category:"Condiments",     serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:32,   cal:10,  note:"Check for onion/garlic",            thresholds:[{maxQty:2,score:0},{maxQty:4,score:1},{maxQty:99,score:2}] },
+  { id:291, name:"Tahini",                         category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:15,   cal:89,  note:"Safe at 1 tbsp",                    thresholds:[{maxQty:1,score:0},{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:292, name:"Sweet chili sauce",              category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:18,   cal:20,  note:"Moderate — fructose + garlic",      thresholds:[{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:293, name:"Sriracha",                       category:"Condiments",     serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:5,    cal:5,   note:"Moderate — garlic",                 thresholds:[{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:294, name:"Worcestershire sauce",           category:"Condiments",     serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:6,    cal:4,   note:"Safe at 1 tsp",                     thresholds:[{maxQty:1,score:0},{maxQty:3,score:1},{maxQty:99,score:2}] },
+  { id:295, name:"Tomato paste",                   category:"Condiments",     serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:32,   cal:27,  note:"Safe at 2 tbsp",                    thresholds:[{maxQty:2,score:0},{maxQty:4,score:1},{maxQty:99,score:2}] },
+  { id:296, name:"Coconut aminos",                 category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:18,   cal:10,  note:"Safe — soy sauce alternative",      thresholds:[{maxQty:99,score:0}] },
+  { id:297, name:"Miso paste (white/yellow)",      category:"Condiments",     serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:18,   cal:34,  note:"Safe at 1 tbsp",                    thresholds:[{maxQty:1,score:0},{maxQty:3,score:1},{maxQty:99,score:2}] },
+
+  // ── HERBS & SPICES ──
+  { id:310, name:"Chives (fresh)",                 category:"Herbs & Spices", serving:"1 tbsp",       baseQty:1,    unit:"tbsp",    gramsPerNative:3,    cal:1,   note:"Safe — great onion substitute",     thresholds:[{maxQty:99,score:0}] },
+  { id:311, name:"Basil (fresh)",                  category:"Herbs & Spices", serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:3,    cal:1,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:312, name:"Cilantro / coriander (fresh)",   category:"Herbs & Spices", serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:3,    cal:1,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:313, name:"Parsley (fresh)",                category:"Herbs & Spices", serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:4,    cal:2,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:314, name:"Mint (fresh)",                   category:"Herbs & Spices", serving:"2 tbsp",       baseQty:2,    unit:"tbsp",    gramsPerNative:4,    cal:2,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:315, name:"Thyme (fresh or dried)",         category:"Herbs & Spices", serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:1,    cal:1,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:316, name:"Rosemary (fresh or dried)",      category:"Herbs & Spices", serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:1,    cal:1,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:317, name:"Oregano (dried)",                category:"Herbs & Spices", serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:1,    cal:3,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:318, name:"Sage (dried)",                   category:"Herbs & Spices", serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:1,    cal:2,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:319, name:"Tarragon (dried)",               category:"Herbs & Spices", serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:1,    cal:5,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:320, name:"Bay leaf",                       category:"Herbs & Spices", serving:"1 leaf",       baseQty:1,    unit:"leaf",    gramsPerNative:0.6,  cal:2,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:321, name:"Paprika (plain, smoked, or sweet)",category:"Herbs & Spices",serving:"1 tsp",      baseQty:1,    unit:"tsp",     gramsPerNative:2,    cal:6,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:322, name:"Cumin (ground)",                 category:"Herbs & Spices", serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:2,    cal:8,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:323, name:"Coriander (ground)",             category:"Herbs & Spices", serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:2,    cal:5,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:324, name:"Turmeric (ground)",              category:"Herbs & Spices", serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:2,    cal:8,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:325, name:"Ginger (fresh)",                 category:"Herbs & Spices", serving:"1 tsp grated", baseQty:1,    unit:"tsp",     gramsPerNative:2,    cal:2,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:326, name:"Ginger (ground)",                category:"Herbs & Spices", serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:2,    cal:6,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:327, name:"Cinnamon (ground)",              category:"Herbs & Spices", serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:3,    cal:6,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:328, name:"Cardamom (ground)",              category:"Herbs & Spices", serving:"¼ tsp",        baseQty:0.25, unit:"tsp",     gramsPerNative:2,    cal:2,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:329, name:"Cloves (ground)",                category:"Herbs & Spices", serving:"¼ tsp",        baseQty:0.25, unit:"tsp",     gramsPerNative:1,    cal:2,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:330, name:"Nutmeg (ground)",                category:"Herbs & Spices", serving:"¼ tsp",        baseQty:0.25, unit:"tsp",     gramsPerNative:1,    cal:3,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:331, name:"Black pepper",                   category:"Herbs & Spices", serving:"¼ tsp",        baseQty:0.25, unit:"tsp",     gramsPerNative:1,    cal:1,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:332, name:"Salt",                           category:"Herbs & Spices", serving:"¼ tsp",        baseQty:0.25, unit:"tsp",     gramsPerNative:1,    cal:0,   note:"Safe — no FODMAPs",                 thresholds:[{maxQty:99,score:0}] },
+  { id:333, name:"Chili flakes / red pepper",      category:"Herbs & Spices", serving:"¼ tsp",        baseQty:0.25, unit:"tsp",     gramsPerNative:0.5,  cal:2,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:334, name:"Vanilla extract",               category:"Herbs & Spices", serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:4,    cal:12,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:335, name:"Garlic powder",                  category:"Herbs & Spices", serving:"any amount",   baseQty:0.25, unit:"tsp",     gramsPerNative:1,    cal:3,   note:"High fructans — avoid",             thresholds:[{maxQty:99,score:2}] },
+  { id:336, name:"Onion powder",                   category:"Herbs & Spices", serving:"any amount",   baseQty:0.25, unit:"tsp",     gramsPerNative:1,    cal:2,   note:"High fructans — avoid",             thresholds:[{maxQty:99,score:2}] },
+  { id:337, name:"Celery salt",                    category:"Herbs & Spices", serving:"¼ tsp",        baseQty:0.25, unit:"tsp",     gramsPerNative:1,    cal:1,   note:"Moderate — celery has mannitol",    thresholds:[{maxQty:1,score:0},{maxQty:99,score:1}] },
+  { id:338, name:"Five spice powder",              category:"Herbs & Spices", serving:"¼ tsp",        baseQty:0.25, unit:"tsp",     gramsPerNative:1,    cal:2,   note:"Safe at small amounts",             thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:339, name:"Mixed herbs (dried)",            category:"Herbs & Spices", serving:"1 tsp",        baseQty:1,    unit:"tsp",     gramsPerNative:1,    cal:4,   note:"Safe — check no garlic/onion added",thresholds:[{maxQty:99,score:0}] },
+  { id:340, name:"Lemongrass (fresh)",             category:"Herbs & Spices", serving:"1 stalk",      baseQty:1,    unit:"stalk",   gramsPerNative:6,    cal:5,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:341, name:"Saffron",                        category:"Herbs & Spices", serving:"¼ tsp",        baseQty:0.25, unit:"tsp",     gramsPerNative:0.2,  cal:1,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:342, name:"Star anise",                     category:"Herbs & Spices", serving:"1 pod",        baseQty:1,    unit:"pod",     gramsPerNative:2,    cal:7,   note:"Safe at 1 pod",                     thresholds:[{maxQty:1,score:0},{maxQty:3,score:1},{maxQty:99,score:2}] },
+  { id:343, name:"Asafoetida / hing (small amount)",category:"Herbs & Spices",serving:"⅛ tsp",       baseQty:0.125,unit:"tsp",     gramsPerNative:0.3,  cal:1,   note:"Safe in tiny amounts — fructans at more", thresholds:[{maxQty:0.125,score:0},{maxQty:0.25,score:1},{maxQty:99,score:2}] },
+
+  // ── BEVERAGES ──
+  { id:360, name:"Water",                          category:"Beverages",      serving:"any amount",   baseQty:1,    unit:"cup",     gramsPerNative:240,  cal:0,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:361, name:"Coffee (black)",                 category:"Beverages",      serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:240,  cal:2,   note:"Safe — coffee has no FODMAPs",      thresholds:[{maxQty:99,score:0}] },
+  { id:362, name:"Espresso",                       category:"Beverages",      serving:"1 shot",       baseQty:1,    unit:"shot",    gramsPerNative:30,   cal:1,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:363, name:"Green tea",                      category:"Beverages",      serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:240,  cal:2,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:364, name:"Black tea",                      category:"Beverages",      serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:240,  cal:2,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:365, name:"Peppermint tea",                 category:"Beverages",      serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:240,  cal:0,   note:"Safe — may help IBS symptoms",      thresholds:[{maxQty:99,score:0}] },
+  { id:366, name:"Chamomile tea",                  category:"Beverages",      serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:240,  cal:2,   note:"Safe at 1 cup",                     thresholds:[{maxQty:1,score:0},{maxQty:2,score:1},{maxQty:99,score:2}] },
+  { id:367, name:"Ginger tea",                     category:"Beverages",      serving:"1 cup",        baseQty:1,    unit:"cup",     gramsPerNative:240,  cal:2,   note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:368, name:"Orange juice (fresh)",           category:"Beverages",      serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:124,  cal:56,  note:"Fructose at larger amounts",        thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:369, name:"Tomato juice (plain)",           category:"Beverages",      serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:120,  cal:21,  note:"Safe at ½ cup",                     thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:370, name:"Cranberry juice (unsweetened)",  category:"Beverages",      serving:"½ cup",        baseQty:0.5,  unit:"cup",     gramsPerNative:120,  cal:46,  note:"Safe at ½ cup",                     thresholds:[{maxQty:0.5,score:0},{maxQty:1,score:1},{maxQty:99,score:2}] },
+  { id:371, name:"Kombucha",                       category:"Beverages",      serving:"8 oz",         baseQty:8,    unit:"oz",      gramsPerNative:28.35,cal:30,  note:"Moderate — fructose",               thresholds:[{maxQty:8,score:1},{maxQty:99,score:2}] },
+  { id:372, name:"Almond milk latte",              category:"Beverages",      serving:"12 oz",        baseQty:12,   unit:"oz",      gramsPerNative:28.35,cal:50,  note:"Safe",                              thresholds:[{maxQty:99,score:0}] },
+  { id:373, name:"Apple juice",                    category:"Beverages",      serving:"4 oz",         baseQty:4,    unit:"oz",      gramsPerNative:28.35,cal:58,  note:"High fructose — avoid",             thresholds:[{maxQty:99,score:2}] },
+  { id:374, name:"Beer (gluten-free)",             category:"Beverages",      serving:"12 oz",        baseQty:12,   unit:"oz",      gramsPerNative:28.35,cal:130, note:"Safe — avoid regular wheat beer",   thresholds:[{maxQty:99,score:0}] },
+  { id:375, name:"Beer (regular wheat/lager)",     category:"Beverages",      serving:"12 oz",        baseQty:12,   unit:"oz",      gramsPerNative:28.35,cal:145, note:"Moderate fructans",                 thresholds:[{maxQty:12,score:1},{maxQty:99,score:2}] },
+  { id:376, name:"Red wine",                       category:"Beverages",      serving:"5 oz",         baseQty:5,    unit:"oz",      gramsPerNative:28.35,cal:125, note:"Safe at 1 glass",                   thresholds:[{maxQty:5,score:0},{maxQty:10,score:1},{maxQty:99,score:2}] },
+  { id:377, name:"White wine",                     category:"Beverages",      serving:"5 oz",         baseQty:5,    unit:"oz",      gramsPerNative:28.35,cal:120, note:"Safe at 1 glass",                   thresholds:[{maxQty:5,score:0},{maxQty:10,score:1},{maxQty:99,score:2}] },
+  { id:378, name:"Spirits (vodka, gin, whiskey)",  category:"Beverages",      serving:"1.5 oz",       baseQty:1.5,  unit:"oz",      gramsPerNative:28.35,cal:97,  note:"Safe — avoid fruit juice mixers",   thresholds:[{maxQty:99,score:0}] },
+];
+
+const MEALS = ["Breakfast","Lunch","Dinner","Snacks"];
+const MEAL_ICONS = {Breakfast:"🌅",Lunch:"☀️",Dinner:"🌙",Snacks:"🍎"};
+const SC = ["#22c55e","#f59e0b","#ef4444"];
+const SBG = ["#dcfce7","#fef3c7","#fee2e2"];
+const ST = ["#15803d","#b45309","#b91c1c"];
+const SL = ["Low","Med","High"];
+const SYMPTOM_LABELS = ["😣 Rough","😕 Poor","😐 Okay","🙂 Good","😊 Great"];
+
+// Unit conversion helpers — convert entered qty to the food's native unit
+// Each food's baseQty is in its native unit (cup, oz, g, piece, etc.)
+// We store gPerBaseQty and ozPerBaseQty on foods that support weight entry.
+// For foods measured by piece/count, only native unit is sensible.
+
+// Conversion: 1 oz = 28.3495 g
+const OZ_TO_G = 28.3495;
+
+// Returns qty in the food's native unit given entered value + chosen input unit
+function toNativeQty(food, enteredQty, inputUnit) {
+  if (inputUnit === "native" || !enteredQty) return enteredQty;
+  // We need grams-per-native-unit to convert
+  const gpn = food.gramsPerNative; // may be undefined for count-based foods
+  if (!gpn) return enteredQty; // fallback: treat as native
+  const enteredGrams = inputUnit === "g" ? enteredQty : enteredQty * OZ_TO_G;
+  return enteredGrams / gpn;
+}
+
+function scoreForQty(food, qty) {
+  for (const t of food.thresholds) {
+    if (qty <= t.maxQty) return t.score;
+  }
+  return food.thresholds[food.thresholds.length - 1].score;
+}
+
+// Format a qty for display (trim unnecessary decimals)
+function fmtQty(n) {
+  if (!n && n !== 0) return "";
+  const s = parseFloat(n.toFixed(2)).toString();
+  return s;
+}
+
+function todayKey() { return new Date().toISOString().slice(0,10); }
+function formatDate(k) {
+  const d = new Date(k+"T12:00:00");
+  return d.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+}
+function emptyDay() { return {meals:{Breakfast:[],Lunch:[],Dinner:[],Snacks:[]},symptom:null,notes:""}; }
+function dayStats(day) {
+  const all = Object.values(day.meals).flat();
+  return {
+    green:all.filter(f=>f.score===0).length,
+    yellow:all.filter(f=>f.score===1).length,
+    red:all.filter(f=>f.score===2).length,
+    cal:all.reduce((s,f)=>s+Math.round(f.cal*f.servingMult),0),
+    total:all.length
+  };
+}
+function loadStatus(s) {
+  if (s.red>=2) return "high";
+  if (s.red===1||s.yellow>=3) return "moderate";
+  return "low";
+}
+
+async function loadDays() { try { const r=localStorage.getItem("fodmap-days-v3"); return r?JSON.parse(r):{}; } catch { return {}; } }
+async function saveDays(d) { try { localStorage.setItem("fodmap-days-v3",JSON.stringify(d)); } catch {} }
+async function loadCustom() { try { const r=localStorage.getItem("fodmap-custom-v3"); return r?JSON.parse(r):[]; } catch { return []; } }
+async function saveCustom(d) { try { localStorage.setItem("fodmap-custom-v3",JSON.stringify(d)); } catch {} }
+async function loadSavedMeals() { try { const r=localStorage.getItem("fodmap-saved-meals-v3"); return r?JSON.parse(r):[]; } catch { return []; } }
+async function saveSavedMeals(d) { try { localStorage.setItem("fodmap-saved-meals-v3",JSON.stringify(d)); } catch {} }
+
+function btnStyle(bg,color,border) {
+  return {background:bg,color,border:`1px solid ${border||"transparent"}`,borderRadius:8,padding:"5px 11px",fontSize:12,fontWeight:600,cursor:"pointer"};
+}
+
+function FODMAPTrackerV61() {
+  const [days,setDays] = useState({});
+  const [customFoods,setCustomFoods] = useState([]);
+  const [savedMeals,setSavedMeals] = useState([]);
+  const [currentDate,setCurrentDate] = useState(todayKey());
+  const [tab,setTab] = useState("today");
+  const [view,setView] = useState("plan"); // plan | add | symptom | addCustom
+  const [activeMeal,setActiveMeal] = useState("Breakfast");
+  const [search,setSearch] = useState("");
+  const [catFilter,setCatFilter] = useState("All");
+  const [loaded,setLoaded] = useState(false);
+  const [toast,setToast] = useState(null);
+  const [editingItem, setEditingItem] = useState(null); // {meal, uid, enteredQty, inputUnit}
+  const [saveMealName,setSaveMealName] = useState("");
+  const [saveMealTarget,setSaveMealTarget] = useState(null);
+  // Custom food form
+  const [cf,setCf] = useState({name:"",category:"Custom",serving:"",baseQty:"1",unit:"serving",cal:"",score:"0"});
+  // Pending add — holds food + chosen serving multiplier before confirm
+  const [pending,setPending] = useState(null); // {food, multIdx}
+
+  useEffect(()=>{
+    (async()=>{
+      const [d,c,sm] = await Promise.all([loadDays(),loadCustom(),loadSavedMeals()]);
+      setDays(d); setCustomFoods(c); setSavedMeals(sm); setLoaded(true);
+    })();
+  },[]);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(()=>setToast(null),2200); };
+
+  const day = days[currentDate]||emptyDay();
+  const stats = dayStats(day);
+  const status = loadStatus(stats);
+
+  const updateDay = (newDay) => {
+    const updated = {...days,[currentDate]:newDay};
+    setDays(updated); saveDays(updated);
+  };
+
+  const allFoods = useMemo(()=>[...FODMAP_DB,...customFoods.map(f=>({...f,custom:true}))]
+  ,[customFoods]);
+
+  const categories = useMemo(()=>["All",...Array.from(new Set(allFoods.map(f=>f.category)))]
+  ,[allFoods]);
+
+  const filtered = useMemo(()=>allFoods.filter(f=>
+    f.name.toLowerCase().includes(search.toLowerCase()) &&
+    (catFilter==="All"||f.category===catFilter)
+  ),[allFoods,search,catFilter]);
+
+  // Open serving picker — default to base qty in native unit
+  const openPending = (food) => {
+    setPending({food, enteredQty: String(food.baseQty), inputUnit: "native"});
+  };
+
+  const confirmAdd = () => {
+    if (!pending) return;
+    const {food, enteredQty, inputUnit} = pending;
+    const raw = parseFloat(enteredQty);
+    if (!raw || raw <= 0) return;
+    const nativeQty = toNativeQty(food, raw, inputUnit);
+    const mult = nativeQty / food.baseQty;
+    const score = scoreForQty(food, nativeQty);
+    // Build display label
+    let displayServing;
+    if (inputUnit === "native") {
+      displayServing = `${fmtQty(raw)} ${food.unit}`;
+    } else {
+      displayServing = `${fmtQty(raw)} ${inputUnit} (${fmtQty(parseFloat(nativeQty.toFixed(2)))} ${food.unit})`;
+    }
+    const item = {
+      ...food,
+      servingMult: mult,
+      score,
+      uid: Date.now()+Math.random(),
+      displayServing
+    };
+    const newDay = {...day, meals:{...day.meals,[activeMeal]:[...day.meals[activeMeal],item]}};
+    updateDay(newDay);
+    setPending(null);
+    setView("plan");
+    setSearch("");
+    showToast(`Added ${food.name}`);
+  };
+
+  const removeFood = (meal,uid) => {
+    updateDay({...day,meals:{...day.meals,[meal]:day.meals[meal].filter(f=>f.uid!==uid)}});
+  };
+
+  const openEdit = (meal, item) => {
+    setEditingItem({meal, uid: item.uid, food: item, enteredQty: String(item.displayServing?.split(' ')[0] || item.baseQty), inputUnit: "native"});
+  };
+
+  const confirmEdit = () => {
+    if (!editingItem) return;
+    const {meal, uid, food, enteredQty, inputUnit} = editingItem;
+    const raw = parseFloat(enteredQty);
+    if (!raw || raw <= 0) return;
+    const nativeQty = toNativeQty(food, raw, inputUnit);
+    const mult = nativeQty / food.baseQty;
+    const score = scoreForQty(food, nativeQty);
+    let displayServing;
+    if (inputUnit === "native") {
+      displayServing = `${fmtQty(raw)} ${food.unit}`;
+    } else {
+      displayServing = `${fmtQty(raw)} ${inputUnit} (${fmtQty(parseFloat(nativeQty.toFixed(2)))} ${food.unit})`;
+    }
+    const updatedItem = {...food, servingMult: mult, score, displayServing, uid};
+    const updatedMeal = day.meals[meal].map(f => f.uid === uid ? updatedItem : f);
+    updateDay({...day, meals:{...day.meals, [meal]: updatedMeal}});
+    setEditingItem(null);
+    showToast("Updated ✓");
+  };
+
+  const setSymptom = (val) => { updateDay({...day,symptom:val}); setView("plan"); showToast("Symptom logged ✓"); };
+
+  // Custom food save
+  const saveCustomFood = () => {
+    if (!cf.name.trim()||!cf.serving.trim()||!cf.cal) return;
+    const food = {
+      id: Date.now(),
+      name: cf.name.trim(),
+      category: cf.category||"Custom",
+      serving: cf.serving.trim(),
+      baseQty: parseFloat(cf.baseQty)||1,
+      unit: cf.unit||"serving",
+      cal: parseInt(cf.cal)||0,
+      note: "Custom food",
+      thresholds: [{maxQty:99, score:parseInt(cf.score)}],
+      custom: true
+    };
+    const updated = [...customFoods, food];
+    setCustomFoods(updated); saveCustom(updated);
+    setCf({name:"",category:"Custom",serving:"",baseQty:"1",unit:"serving",cal:"",score:"0"});
+    setView("add");
+    showToast(`Saved "${food.name}"`);
+  };
+
+  const deleteCustomFood = (id) => {
+    const updated = customFoods.filter(f=>f.id!==id);
+    setCustomFoods(updated); saveCustom(updated);
+    showToast("Custom food deleted");
+  };
+
+  // Saved meals
+  const saveCurrentMeal = (mealName,foods) => {
+    if (!saveMealName.trim()||foods.length===0) return;
+    const updated = [...savedMeals,{id:Date.now(),name:saveMealName.trim(),foods,mealType:mealName}];
+    setSavedMeals(updated); saveSavedMeals(updated);
+    setSaveMealName(""); setSaveMealTarget(null);
+    showToast(`Saved "${saveMealName.trim()}" ✓`);
+  };
+  const applySavedMeal = (sm) => {
+    const newFoods = sm.foods.map(f=>({...f,uid:Date.now()+Math.random()}));
+    const target = sm.mealType||"Breakfast";
+    updateDay({...day,meals:{...day.meals,[target]:[...day.meals[target],...newFoods]}});
+    showToast(`Added ${sm.name} to ${target}`);
+  };
+  const deleteSavedMeal = (id) => {
+    const updated = savedMeals.filter(m=>m.id!==id);
+    setSavedMeals(updated); saveSavedMeals(updated);
+  };
+
+  const historyDays = Object.keys(days).filter(k=>dayStats(days[k]).total>0).sort((a,b)=>b.localeCompare(a));
+  const statusColor = status==="high"?"#ef4444":status==="moderate"?"#f59e0b":"#22c55e";
+  const statusBg = status==="high"?"#fee2e2":status==="moderate"?"#fef3c7":"#dcfce7";
+  const isToday = currentDate===todayKey();
+
+  if (!loaded) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",fontFamily:"system-ui",color:"#9ca3af",fontSize:14}}>Loading…</div>;
+
+  // ── SERVING PICKER OVERLAY ────────────────────────────────────────────────────
+  if (pending) {
+    const {food, enteredQty, inputUnit} = pending;
+    const raw = parseFloat(enteredQty);
+    const validQty = raw && raw > 0;
+    const nativeQty = validQty ? toNativeQty(food, raw, inputUnit) : 0;
+    const score = validQty ? scoreForQty(food, nativeQty) : food.thresholds[0].score;
+    const estCal = validQty ? Math.round(food.cal * (nativeQty / food.baseQty)) : food.cal;
+    const hasWeight = !!food.gramsPerNative;
+
+    // Compute equivalent display for reference
+    let equivText = "";
+    if (validQty && inputUnit !== "native" && hasWeight) {
+      equivText = `= ${fmtQty(parseFloat(nativeQty.toFixed(2)))} ${food.unit}`;
+    }
+
+    // Safe threshold hint
+    const safeThreshold = food.thresholds[0];
+    const safeLine = safeThreshold.score === 0
+      ? `Safe up to ${fmtQty(safeThreshold.maxQty)} ${food.unit}`
+      : `Starts at Medium from ${fmtQty(safeThreshold.maxQty)} ${food.unit}`;
+
+    return (
+      <div style={{fontFamily:"system-ui,sans-serif",maxWidth:520,margin:"0 auto",background:"#f8f7f4",minHeight:"100vh"}}>
+        <div style={{background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"14px 16px",display:"flex",alignItems:"center",gap:10}}>
+          <button onClick={()=>setPending(null)} style={btnStyle("#f3f4f6","#374151")}>← Back</button>
+          <span style={{fontWeight:700,fontSize:15,color:"#111"}}>Choose serving size</span>
+        </div>
+        <div style={{padding:20}}>
+          {/* Food info card */}
+          <div style={{background:"#fff",borderRadius:14,border:"1px solid #e5e7eb",padding:14,marginBottom:14}}>
+            <div style={{fontSize:15,fontWeight:700,color:"#111",marginBottom:3}}>{food.name}</div>
+            <div style={{fontSize:12,color:"#6b7280"}}>Reference serving: <strong>{food.serving}</strong></div>
+            <div style={{fontSize:12,color:ST[food.thresholds[0].score],marginTop:2}}>{food.note}</div>
+            <div style={{fontSize:11,color:"#9ca3af",marginTop:4}}>{safeLine}</div>
+          </div>
+
+          {/* Input row */}
+          <div style={{background:"#fff",borderRadius:14,border:"1px solid #e5e7eb",padding:16,marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:600,color:"#374151",marginBottom:10}}>How much did she have?</div>
+            <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={enteredQty}
+                onChange={e=>setPending({...pending, enteredQty:e.target.value})}
+                style={{flex:1,padding:"11px 14px",borderRadius:10,border:"1px solid #d1d5db",fontSize:18,fontWeight:600,textAlign:"center",fontFamily:"inherit",outline:"none"}}
+                autoFocus
+              />
+              <select
+                value={inputUnit}
+                onChange={e=>setPending({...pending, inputUnit:e.target.value, enteredQty: e.target.value==="native" ? String(food.baseQty) : e.target.value==="g" ? String(Math.round(food.baseQty*(food.gramsPerNative||1))) : String(parseFloat(((food.baseQty*(food.gramsPerNative||28.35))/OZ_TO_G).toFixed(1)))})}
+                style={{padding:"11px 10px",borderRadius:10,border:"1px solid #d1d5db",fontSize:14,background:"#fff",fontFamily:"inherit",cursor:"pointer"}}
+              >
+                <option value="native">{food.unit}</option>
+                {hasWeight && <option value="g">grams</option>}
+                {hasWeight && <option value="oz">oz</option>}
+              </select>
+            </div>
+            {equivText && <div style={{fontSize:12,color:"#6b7280",textAlign:"right",marginBottom:8}}>{equivText}</div>}
+
+            {/* Quick presets */}
+            <div style={{fontSize:11,color:"#9ca3af",marginBottom:6}}>Quick amounts:</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {[0.25,0.5,0.75,1,1.5,2].map(mult=>{
+                let presetVal, presetLabel;
+                if (inputUnit==="native") {
+                  presetVal = String(fmtQty(food.baseQty*mult));
+                  presetLabel = `${fmtQty(food.baseQty*mult)} ${food.unit}`;
+                } else if (inputUnit==="g") {
+                  presetVal = String(Math.round(food.baseQty*mult*(food.gramsPerNative||1)));
+                  presetLabel = `${presetVal}g`;
+                } else {
+                  presetVal = String(parseFloat(((food.baseQty*mult*(food.gramsPerNative||28.35))/OZ_TO_G).toFixed(1)));
+                  presetLabel = `${presetVal}oz`;
+                }
+                const pNative = toNativeQty(food, parseFloat(presetVal), inputUnit);
+                const pScore = scoreForQty(food, pNative);
+                return (
+                  <button key={mult} onClick={()=>setPending({...pending, enteredQty:presetVal})}
+                    style={{padding:"5px 10px",borderRadius:8,border:`1px solid ${SC[pScore]}`,background:SBG[pScore],
+                    fontSize:11,fontWeight:600,color:ST[pScore],cursor:"pointer"}}>
+                    {presetLabel}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Result preview */}
+          {validQty && (
+            <div style={{background:SBG[score],borderRadius:12,padding:"13px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:700,color:ST[score]}}>{enteredQty} {inputUnit==="native"?food.unit:inputUnit}{equivText?` ${equivText}`:""}</div>
+                <div style={{fontSize:12,color:ST[score],marginTop:2}}>{food.note}</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:22,fontWeight:800,color:ST[score]}}>{SL[score]}</div>
+                <div style={{fontSize:11,color:ST[score]}}>{estCal} kcal</div>
+              </div>
+            </div>
+          )}
+
+          <button onClick={confirmAdd} disabled={!validQty}
+            style={{width:"100%",padding:"14px 0",
+            background:validQty?"#16a34a":"#d1d5db",
+            color:"#fff",border:"none",borderRadius:12,fontSize:15,fontWeight:700,cursor:validQty?"pointer":"default"}}>
+            Add to {activeMeal}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── EDIT ITEM OVERLAY ─────────────────────────────────────────────────────────
+  if (editingItem) {
+    const {meal, food, enteredQty, inputUnit} = editingItem;
+    const raw = parseFloat(enteredQty);
+    const validQty = raw && raw > 0;
+    const nativeQty = validQty ? toNativeQty(food, raw, inputUnit) : 0;
+    const score = validQty ? scoreForQty(food, nativeQty) : food.score;
+    const estCal = validQty ? Math.round(food.cal * (nativeQty / food.baseQty)) : food.cal;
+    const hasWeight = !!food.gramsPerNative;
+    let equivText = "";
+    if (validQty && inputUnit !== "native" && hasWeight) {
+      equivText = `= ${fmtQty(parseFloat(nativeQty.toFixed(2)))} ${food.unit}`;
+    }
+    return (
+      <div style={{fontFamily:"system-ui,sans-serif",maxWidth:520,margin:"0 auto",background:"#f8f7f4",minHeight:"100vh"}}>
+        <div style={{background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"14px 16px",display:"flex",alignItems:"center",gap:10}}>
+          <button onClick={()=>setEditingItem(null)} style={btnStyle("#f3f4f6","#374151")}>← Cancel</button>
+          <span style={{fontWeight:700,fontSize:15,color:"#111",flex:1}}>Edit serving — {food.name}</span>
+        </div>
+        <div style={{padding:20}}>
+          <div style={{background:"#fff",borderRadius:14,border:"1px solid #e5e7eb",padding:14,marginBottom:14}}>
+            <div style={{fontSize:13,color:"#6b7280"}}>Reference serving: <strong>{food.serving}</strong></div>
+            <div style={{fontSize:12,color:ST[food.thresholds[0].score],marginTop:2}}>{food.note}</div>
+          </div>
+          <div style={{background:"#fff",borderRadius:14,border:"1px solid #e5e7eb",padding:16,marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:600,color:"#374151",marginBottom:10}}>New amount</div>
+            <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+              <input type="number" min="0" step="any" value={enteredQty}
+                onChange={e=>setEditingItem({...editingItem, enteredQty:e.target.value})}
+                style={{flex:1,padding:"11px 14px",borderRadius:10,border:"1px solid #d1d5db",fontSize:18,fontWeight:600,textAlign:"center",fontFamily:"inherit",outline:"none"}}
+                autoFocus />
+              <select value={inputUnit}
+                onChange={e=>setEditingItem({...editingItem, inputUnit:e.target.value,
+                  enteredQty: e.target.value==="native" ? String(food.baseQty)
+                    : e.target.value==="g" ? String(Math.round(food.baseQty*(food.gramsPerNative||1)))
+                    : String(parseFloat(((food.baseQty*(food.gramsPerNative||28.35))/OZ_TO_G).toFixed(1)))})}
+                style={{padding:"11px 10px",borderRadius:10,border:"1px solid #d1d5db",fontSize:14,background:"#fff",fontFamily:"inherit",cursor:"pointer"}}>
+                <option value="native">{food.unit}</option>
+                {hasWeight && <option value="g">grams</option>}
+                {hasWeight && <option value="oz">oz</option>}
+              </select>
+            </div>
+            {equivText && <div style={{fontSize:12,color:"#6b7280",textAlign:"right",marginBottom:8}}>{equivText}</div>}
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {[0.25,0.5,0.75,1,1.5,2].map(mult=>{
+                let presetVal;
+                if (inputUnit==="native") presetVal = String(fmtQty(food.baseQty*mult));
+                else if (inputUnit==="g") presetVal = String(Math.round(food.baseQty*mult*(food.gramsPerNative||1)));
+                else presetVal = String(parseFloat(((food.baseQty*mult*(food.gramsPerNative||28.35))/OZ_TO_G).toFixed(1)));
+                const pNative = toNativeQty(food, parseFloat(presetVal), inputUnit);
+                const pScore = scoreForQty(food, pNative);
+                return (
+                  <button key={mult} onClick={()=>setEditingItem({...editingItem, enteredQty:presetVal})}
+                    style={{padding:"5px 10px",borderRadius:8,border:`1px solid ${SC[pScore]}`,background:SBG[pScore],fontSize:11,fontWeight:600,color:ST[pScore],cursor:"pointer"}}>
+                    {presetVal}{inputUnit==="native"?` ${food.unit}`:inputUnit==="g"?"g":"oz"}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {validQty && (
+            <div style={{background:SBG[score],borderRadius:12,padding:"13px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:700,color:ST[score]}}>{enteredQty} {inputUnit==="native"?food.unit:inputUnit}{equivText?` ${equivText}`:""}</div>
+                <div style={{fontSize:12,color:ST[score],marginTop:2}}>{food.note}</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:22,fontWeight:800,color:ST[score]}}>{SL[score]}</div>
+                <div style={{fontSize:11,color:ST[score]}}>{estCal} kcal</div>
+              </div>
+            </div>
+          )}
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={confirmEdit} disabled={!validQty}
+              style={{flex:1,padding:"13px 0",background:validQty?"#16a34a":"#d1d5db",color:"#fff",border:"none",borderRadius:12,fontSize:15,fontWeight:700,cursor:validQty?"pointer":"default"}}>
+              Save changes
+            </button>
+            <button onClick={()=>{removeFood(editingItem.meal, editingItem.uid); setEditingItem(null); showToast("Removed");}}
+              style={{padding:"13px 18px",background:"#fee2e2",color:"#b91c1c",border:"1px solid #fca5a5",borderRadius:12,fontSize:14,fontWeight:600,cursor:"pointer"}}>
+              Remove
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── ADD CUSTOM FOOD ───────────────────────────────────────────────────────────
+  if (view==="addCustom") return (
+    <div style={{fontFamily:"system-ui,sans-serif",maxWidth:520,margin:"0 auto",background:"#f8f7f4",minHeight:"100vh"}}>
+      <div style={{background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"14px 16px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
+        <button onClick={()=>setView("add")} style={btnStyle("#f3f4f6","#374151")}>← Back</button>
+        <span style={{fontWeight:700,fontSize:15,color:"#111"}}>Add custom food</span>
+      </div>
+      <div style={{padding:20}}>
+        <p style={{fontSize:13,color:"#6b7280",marginTop:0}}>Add a food not in the database. Use the Monash University app to find the correct FODMAP level.</p>
+        {[
+          ["Food name","text","name","e.g. My protein bar"],
+          ["Serving description","text","serving","e.g. 1 bar (45g)"],
+          ["Quantity at that serving","number","baseQty","e.g. 1"],
+          ["Unit","text","unit","e.g. bar, cup, oz"],
+          ["Calories at that serving","number","cal","e.g. 200"],
+        ].map(([label,type,key,placeholder])=>(
+          <div key={key} style={{marginBottom:14}}>
+            <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>{label}</label>
+            <input type={type} value={cf[key]} placeholder={placeholder}
+              onChange={e=>setCf({...cf,[key]:e.target.value})}
+              style={{width:"100%",boxSizing:"border-box",padding:"9px 12px",borderRadius:9,border:"1px solid #d1d5db",fontSize:14,fontFamily:"inherit"}} />
+          </div>
+        ))}
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>Category</label>
+          <select value={cf.category} onChange={e=>setCf({...cf,category:e.target.value})}
+            style={{width:"100%",padding:"9px 12px",borderRadius:9,border:"1px solid #d1d5db",fontSize:14,background:"#fff"}}>
+            {["Grains","Vegetables","Fruits","Protein","Dairy & Alt","Nuts & Seeds","Condiments","Beverages","Custom"].map(c=><option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div style={{marginBottom:20}}>
+          <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:8}}>FODMAP level at this serving</label>
+          <div style={{display:"flex",gap:8}}>
+            {[[0,"Low","#dcfce7","#15803d"],[1,"Med","#fef3c7","#b45309"],[2,"High","#fee2e2","#b91c1c"]].map(([v,l,bg,col])=>(
+              <button key={v} onClick={()=>setCf({...cf,score:String(v)})} style={{
+                flex:1,padding:"10px 0",borderRadius:10,border:`2px solid ${cf.score==v?col:"#e5e7eb"}`,
+                background:cf.score==v?bg:"#f9fafb",fontSize:13,fontWeight:700,
+                color:cf.score==v?col:"#9ca3af",cursor:"pointer"
+              }}>{l}</button>
+            ))}
+          </div>
+        </div>
+        <button onClick={saveCustomFood} disabled={!cf.name.trim()||!cf.serving.trim()||!cf.cal}
+          style={{width:"100%",padding:"13px 0",background:(!cf.name.trim()||!cf.serving.trim()||!cf.cal)?"#d1d5db":"#16a34a",
+          color:"#fff",border:"none",borderRadius:12,fontSize:15,fontWeight:700,cursor:"pointer"}}>
+          Save food
+        </button>
+
+        {/* Existing custom foods */}
+        {customFoods.length>0&&(
+          <div style={{marginTop:24}}>
+            <div style={{fontSize:13,fontWeight:700,color:"#374151",marginBottom:10}}>Your custom foods</div>
+            {customFoods.map(f=>(
+              <div key={f.id} style={{background:"#fff",borderRadius:10,border:"1px solid #e5e7eb",padding:"10px 12px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
+                <span style={{width:9,height:9,borderRadius:"50%",background:SC[f.thresholds[0].score],display:"inline-block",flexShrink:0}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:600,color:"#111"}}>{f.name}</div>
+                  <div style={{fontSize:11,color:"#9ca3af"}}>{f.serving} · {f.cal} kcal · {f.category}</div>
+                </div>
+                <button onClick={()=>deleteCustomFood(f.id)} style={btnStyle("#fee2e2","#b91c1c","#fca5a5")}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ── ADD FOOD VIEW ─────────────────────────────────────────────────────────────
+  if (view==="add") return (
+    <div style={{fontFamily:"system-ui,sans-serif",maxWidth:520,margin:"0 auto",background:"#f8f7f4",minHeight:"100vh",paddingBottom:32}}>
+      <div style={{background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"14px 16px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}>
+        <button onClick={()=>{setView("plan");setSearch("");}} style={btnStyle("#f3f4f6","#374151")}>← Back</button>
+        <span style={{fontWeight:700,fontSize:15,color:"#111",flex:1}}>Add to {activeMeal}</span>
+        <button onClick={()=>setView("addCustom")} style={btnStyle("#f0fdf4","#16a34a","#86efac")}>+ Custom</button>
+      </div>
+      <div style={{padding:"12px 16px 0"}}>
+        <input type="text" placeholder="Search 139+ foods…" value={search} onChange={e=>setSearch(e.target.value)}
+          style={{width:"100%",boxSizing:"border-box",padding:"10px 14px",borderRadius:10,border:"1px solid #d1d5db",fontSize:14,background:"#fff",outline:"none",marginBottom:10}} autoFocus/>
+        <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:10,scrollbarWidth:"none"}}>
+          {categories.map(cat=>(
+            <button key={cat} onClick={()=>setCatFilter(cat)} style={{
+              flexShrink:0,padding:"5px 12px",borderRadius:20,border:"1px solid",
+              fontSize:12,fontWeight:500,cursor:"pointer",
+              background:catFilter===cat?"#16a34a":"#fff",
+              color:catFilter===cat?"#fff":"#374151",
+              borderColor:catFilter===cat?"#16a34a":"#d1d5db"
+            }}>{cat}</button>
+          ))}
+        </div>
+        <div style={{background:"#fff",borderRadius:14,border:"1px solid #e5e7eb",overflow:"hidden"}}>
+          {filtered.length===0
+            ? <div style={{padding:20,textAlign:"center"}}>
+                <div style={{fontSize:13,color:"#9ca3af",marginBottom:12}}>No foods match "{search}"</div>
+                <a href="https://www.monashfodmap.com/ibs-central/i-have-ibs/get-the-app/" target="_blank" rel="noopener noreferrer"
+                  style={{display:"inline-block",padding:"9px 16px",background:"#f0fdf4",border:"1px solid #86efac",borderRadius:10,fontSize:13,fontWeight:600,color:"#16a34a",textDecoration:"none"}}>
+                  🔍 Check Monash app for "{search}"
+                </a>
+                <div style={{marginTop:8,fontSize:11,color:"#9ca3af"}}>Or add it as a Custom food using the + Custom button above</div>
+              </div>
+            : <>
+                {filtered.map((f,i)=>(
+                  <div key={f.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderTop:i>0?"1px solid #f3f4f6":"none"}}>
+                    <span style={{width:11,height:11,borderRadius:"50%",background:SC[f.score],flexShrink:0,display:"inline-block"}}/>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:600,color:"#111",display:"flex",alignItems:"center",gap:5}}>
+                        {f.name}
+                        {f.custom&&<span style={{fontSize:10,background:"#f0fdf4",color:"#16a34a",padding:"1px 5px",borderRadius:5,fontWeight:600}}>custom</span>}
+                      </div>
+                      <div style={{fontSize:11,color:"#9ca3af"}}>{f.serving} · {f.cal} kcal</div>
+                      <div style={{fontSize:11,color:ST[f.score]}}>{f.note}</div>
+                    </div>
+                    <button onClick={()=>openPending(f)} style={btnStyle("#f0fdf4","#16a34a","#86efac")}>Add</button>
+                  </div>
+                ))}
+                {search.length > 0 && (
+                  <div style={{padding:"10px 14px",borderTop:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <span style={{fontSize:12,color:"#9ca3af"}}>Not seeing it?</span>
+                    <a href="https://www.monashfodmap.com/ibs-central/i-have-ibs/get-the-app/" target="_blank" rel="noopener noreferrer"
+                      style={{fontSize:12,fontWeight:600,color:"#16a34a",textDecoration:"none"}}>Check Monash app →</a>
+                  </div>
+                )}
+              </>
+          }
+        </div>
+        <div style={{marginTop:10,fontSize:11,color:"#9ca3af",textAlign:"center"}}>300+ foods from Monash University & FODMAP Friendly research · Tap Add to choose serving size</div>
+      </div>
+    </div>
+  );
+
+  // ── SYMPTOM VIEW ──────────────────────────────────────────────────────────────
+  if (view==="symptom") return (
+    <div style={{fontFamily:"system-ui,sans-serif",maxWidth:520,margin:"0 auto",background:"#f8f7f4",minHeight:"100vh"}}>
+      <div style={{background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"14px 16px",display:"flex",alignItems:"center",gap:10}}>
+        <button onClick={()=>setView("plan")} style={btnStyle("#f3f4f6","#374151")}>← Back</button>
+        <span style={{fontWeight:700,fontSize:15,color:"#111"}}>How did you feel today?</span>
+      </div>
+      <div style={{padding:20}}>
+        <p style={{fontSize:13,color:"#6b7280",marginTop:0}}>Rate gut symptoms for {formatDate(currentDate)}.</p>
+        <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
+          {SYMPTOM_LABELS.map((label,i)=>(
+            <button key={i} onClick={()=>setSymptom(i+1)} style={{
+              padding:"13px 18px",borderRadius:12,
+              border:`2px solid ${day.symptom===i+1?"#16a34a":"#e5e7eb"}`,
+              background:day.symptom===i+1?"#f0fdf4":"#fff",
+              fontSize:15,fontWeight:600,color:day.symptom===i+1?"#15803d":"#374151",
+              cursor:"pointer",textAlign:"left"
+            }}>{label}</button>
+          ))}
+        </div>
+        <textarea placeholder="Notes (bloating after lunch, felt fine all day…)"
+          value={day.notes} onChange={e=>updateDay({...day,notes:e.target.value})}
+          style={{width:"100%",boxSizing:"border-box",padding:"10px 14px",borderRadius:10,border:"1px solid #d1d5db",fontSize:13,minHeight:80,resize:"vertical",fontFamily:"inherit"}}/>
+      </div>
+    </div>
+  );
+
+  // ── MAIN ──────────────────────────────────────────────────────────────────────
+  return (
+    <div style={{fontFamily:"system-ui,sans-serif",maxWidth:520,margin:"0 auto",background:"#f8f7f4",minHeight:"100vh",paddingBottom:80}}>
+      {toast&&<div style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",background:"#1a1a1a",color:"#fff",padding:"8px 18px",borderRadius:20,fontSize:13,fontWeight:500,zIndex:100,whiteSpace:"nowrap"}}>{toast}</div>}
+
+      {/* Header */}
+      <div style={{background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"14px 16px 12px",position:"sticky",top:0,zIndex:10}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:20}}>🌿</span>
+            <span style={{fontSize:17,fontWeight:700,color:"#1a1a1a",letterSpacing:-0.3}}>FODMAP Tracker</span>
+          </div>
+          {tab==="today"&&(
+            <div style={{display:"flex",gap:4,alignItems:"center"}}>
+              <button onClick={()=>{const d=new Date(currentDate+"T12:00:00");d.setDate(d.getDate()-1);setCurrentDate(d.toISOString().slice(0,10));}}
+                style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#6b7280",padding:"0 4px"}}>‹</button>
+              <span style={{fontSize:12,fontWeight:600,color:"#374151",minWidth:82,textAlign:"center"}}>{isToday?"Today":formatDate(currentDate)}</span>
+              <button onClick={()=>{const d=new Date(currentDate+"T12:00:00");d.setDate(d.getDate()+1);const next=d.toISOString().slice(0,10);if(next<=todayKey())setCurrentDate(next);}}
+                disabled={currentDate>=todayKey()}
+                style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:currentDate>=todayKey()?"#d1d5db":"#6b7280",padding:"0 4px"}}>›</button>
+            </div>
+          )}
+        </div>
+        <div style={{display:"flex",gap:4,marginTop:10}}>
+          {[["today","📋 Log"],["history","📅 History"],["saved","⭐ Saved"]].map(([t,label])=>(
+            <button key={t} onClick={()=>setTab(t)} style={{flex:1,padding:"6px 0",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:tab===t?"#16a34a":"#f3f4f6",color:tab===t?"#fff":"#6b7280"}}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* TODAY */}
+      {tab==="today"&&<>
+        <div style={{margin:"12px 14px 0",background:"#fff",borderRadius:14,padding:"12px 14px",border:"1px solid #e5e7eb"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <span style={{fontSize:13,fontWeight:700,color:"#374151"}}>Daily FODMAP Load</span>
+            <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:statusBg,color:statusColor}}>
+              {status==="high"?"⚠️ Too high":status==="moderate"?"⚡ Moderate":"✓ Safe"}
+            </span>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            {[["🟢",stats.green,"Low","#dcfce7","#15803d"],["🟡",stats.yellow,"Med","#fef3c7","#b45309"],["🔴",stats.red,"High","#fee2e2","#b91c1c"],["🔥",stats.cal,"kcal","#f3f4f6","#374151"]].map(([e,v,l,bg,c])=>(
+              <div key={l} style={{flex:1,background:bg,borderRadius:10,padding:"7px 4px",textAlign:"center"}}>
+                <div style={{fontSize:16}}>{e}</div>
+                <div style={{fontSize:18,fontWeight:700,color:c,lineHeight:1.1}}>{v}</div>
+                <div style={{fontSize:10,color:c,fontWeight:500}}>{l}</div>
+              </div>
+            ))}
+          </div>
+          {status==="high"&&<div style={{marginTop:8,padding:"7px 10px",background:"#fee2e2",borderRadius:8,fontSize:12,color:"#b91c1c"}}>⚠️ {stats.red} high-FODMAP items — consider swapping one out.</div>}
+          {status==="moderate"&&<div style={{marginTop:8,padding:"7px 10px",background:"#fef3c7",borderRadius:8,fontSize:12,color:"#b45309"}}>Space high-FODMAP foods across different meals.</div>}
+          <div style={{marginTop:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:12,color:"#6b7280"}}>{day.symptom?`Feeling: ${SYMPTOM_LABELS[day.symptom-1]}`:"No symptom logged"}</span>
+            <button onClick={()=>setView("symptom")} style={btnStyle("#f3f4f6","#374151")}>{day.symptom?"Edit":"Log how I feel"}</button>
+          </div>
+        </div>
+
+        <div style={{padding:"12px 14px 0"}}>
+          {MEALS.map(meal=>(
+            <div key={meal} style={{background:"#fff",borderRadius:14,border:"1px solid #e5e7eb",marginBottom:10,overflow:"hidden"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 14px 9px"}}>
+                <span style={{fontWeight:700,fontSize:14,color:"#1a1a1a"}}>{MEAL_ICONS[meal]} {meal}</span>
+                <div style={{display:"flex",gap:6}}>
+                  {day.meals[meal].length>0&&(
+                    saveMealTarget===meal
+                      ? <div style={{display:"flex",gap:5,alignItems:"center"}}>
+                          <input value={saveMealName} onChange={e=>setSaveMealName(e.target.value)} placeholder="Name…"
+                            style={{padding:"4px 8px",borderRadius:7,border:"1px solid #d1d5db",fontSize:12,width:100}}/>
+                          <button onClick={()=>saveCurrentMeal(meal,day.meals[meal])} style={btnStyle("#f0fdf4","#16a34a","#86efac")}>Save</button>
+                          <button onClick={()=>setSaveMealTarget(null)} style={btnStyle("#f3f4f6","#6b7280")}>✕</button>
+                        </div>
+                      : <button onClick={()=>{setSaveMealTarget(meal);setSaveMealName("");}} style={btnStyle("#fef9c3","#b45309","#fde68a")} title="Save meal">⭐</button>
+                  )}
+                  <button onClick={()=>{setActiveMeal(meal);setView("add");}} style={btnStyle("#f0fdf4","#16a34a","#86efac")}>+ Add</button>
+                </div>
+              </div>
+              {day.meals[meal].length===0
+                ? <div style={{padding:"0 14px 11px",fontSize:12,color:"#9ca3af",fontStyle:"italic"}}>Nothing added yet</div>
+                : <div style={{padding:"0 10px 10px"}}>
+                    {day.meals[meal].map(f=>(
+                      <div key={f.uid} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 4px",borderTop:"1px solid #f3f4f6"}}>
+                        <span style={{width:9,height:9,borderRadius:"50%",background:SC[f.score],flexShrink:0,display:"inline-block"}}/>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:500,color:"#111",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{f.name}</div>
+                          <div style={{fontSize:11,color:"#9ca3af"}}>{f.displayServing||f.serving} · {Math.round(f.cal*f.servingMult)} kcal</div>
+                        </div>
+                        <span style={{fontSize:10,fontWeight:600,padding:"2px 7px",borderRadius:10,background:SBG[f.score],color:ST[f.score]}}>{SL[f.score]}</span>
+                        <button onClick={()=>openEdit(meal,f)} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:14,padding:"0 3px"}} title="Edit serving">✏️</button>
+                        <button onClick={()=>removeFood(meal,f.uid)} style={{background:"none",border:"none",color:"#d1d5db",cursor:"pointer",fontSize:17,padding:"0 2px"}} title="Remove">×</button>
+                      </div>
+                    ))}
+                  </div>
+              }
+            </div>
+          ))}
+        </div>
+
+        <div style={{margin:"0 14px 16px",padding:"11px 14px",background:"#fff",borderRadius:14,border:"1px solid #e5e7eb"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:6}}>FODMAP key</div>
+          <div style={{fontSize:12,color:"#6b7280",lineHeight:1.8}}>
+            <span style={{color:"#15803d",fontWeight:600}}>● Low</span> — Safe at listed serving &nbsp;
+            <span style={{color:"#b45309",fontWeight:600}}>● Med</span> — Small amounts OK &nbsp;
+            <span style={{color:"#b91c1c",fontWeight:600}}>● High</span> — Max 1/day · Serving size changes the score
+          </div>
+        </div>
+      </>}
+
+      {/* HISTORY */}
+      {tab==="history"&&<div style={{padding:"12px 14px"}}>
+        <p style={{fontSize:13,color:"#6b7280",marginTop:4,marginBottom:12}}>Tap a day to review it.</p>
+        {historyDays.length===0
+          ? <div style={{padding:30,textAlign:"center",color:"#9ca3af",fontSize:13}}>No days logged yet.</div>
+          : historyDays.map(key=>{
+              const s=dayStats(days[key]);
+              const st=loadStatus(s);
+              const stColor=st==="high"?"#ef4444":st==="moderate"?"#f59e0b":"#22c55e";
+              const stBg=st==="high"?"#fee2e2":st==="moderate"?"#fef3c7":"#dcfce7";
+              return (
+                <div key={key} onClick={()=>{setCurrentDate(key);setTab("today");}}
+                  style={{background:"#fff",borderRadius:14,border:"1px solid #e5e7eb",padding:"12px 14px",marginBottom:8,cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:700,color:"#111"}}>{key===todayKey()?"Today":formatDate(key)}</div>
+                    <div style={{fontSize:12,color:"#6b7280",marginTop:2}}>
+                      🟢{s.green} 🟡{s.yellow} 🔴{s.red} · {s.cal} kcal
+                      {days[key].symptom?` · ${SYMPTOM_LABELS[days[key].symptom-1]}`:""}
+                    </div>
+                    {days[key].notes&&<div style={{fontSize:11,color:"#9ca3af",marginTop:3,fontStyle:"italic"}}>{days[key].notes.slice(0,60)}{days[key].notes.length>60?"…":""}</div>}
+                  </div>
+                  <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:20,background:stBg,color:stColor,flexShrink:0}}>
+                    {st==="high"?"High":st==="moderate"?"Moderate":"Safe"}
+                  </span>
+                </div>
+              );
+            })
+        }
+      </div>}
+
+      {/* SAVED */}
+      {tab==="saved"&&<div style={{padding:"12px 14px"}}>
+        <p style={{fontSize:13,color:"#6b7280",marginTop:4,marginBottom:12}}>Tap ⭐ on any meal in the Log to save it here for quick re-use.</p>
+        {savedMeals.length===0
+          ? <div style={{padding:30,textAlign:"center",color:"#9ca3af",fontSize:13}}>No saved meals yet.</div>
+          : savedMeals.map(sm=>{
+              const ss={green:sm.foods.filter(f=>f.score===0).length,yellow:sm.foods.filter(f=>f.score===1).length,red:sm.foods.filter(f=>f.score===2).length,cal:sm.foods.reduce((s,f)=>s+Math.round(f.cal*(f.servingMult||1)),0)};
+              return (
+                <div key={sm.id} style={{background:"#fff",borderRadius:14,border:"1px solid #e5e7eb",padding:"12px 14px",marginBottom:8}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:700,color:"#111"}}>{sm.name}</div>
+                      <div style={{fontSize:11,color:"#9ca3af"}}>Usually: {sm.mealType} · {sm.foods.length} items · {ss.cal} kcal</div>
+                    </div>
+                    <div style={{display:"flex",gap:6}}>
+                      <button onClick={()=>applySavedMeal(sm)} style={btnStyle("#f0fdf4","#16a34a","#86efac")}>+ Add</button>
+                      <button onClick={()=>deleteSavedMeal(sm.id)} style={btnStyle("#fee2e2","#b91c1c","#fca5a5")}>✕</button>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                    {sm.foods.map((f,i)=>(
+                      <span key={i} style={{fontSize:11,padding:"2px 8px",borderRadius:10,background:SBG[f.score],color:ST[f.score],fontWeight:500}}>{f.name}</span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })
+        }
+      </div>}
+    </div>
+  );
+}
+
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<FODMAPTrackerV61 />);
+  </script>
+</body>
+</html>
