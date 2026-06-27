@@ -3,6 +3,25 @@
  * Tests for scoring, unit conversion, and storage functions
  */
 
+// Mock localStorage for Node.js (Jest) environment
+if (typeof global.localStorage === 'undefined') {
+  global.localStorage = {
+    _data: {},
+    getItem(key) {
+      return this._data[key] || null;
+    },
+    setItem(key, value) {
+      this._data[key] = String(value);
+    },
+    removeItem(key) {
+      delete this._data[key];
+    },
+    clear() {
+      this._data = {};
+    }
+  };
+}
+
 // ── HELPER FUNCTIONS (copied from app) ────────────────────────────────────
 
 const OZ_TO_G = 28.3495;
@@ -186,6 +205,18 @@ describe("Integration - Convert then Score", () => {
     // 80g oats = 1 cup native (gramsPerNative: 80)
     const nativeQty = toNativeQty(testFoods.oats, 80, "g");
     expect(nativeQty).toBeCloseTo(1, 1);
+    // At exactly 1 cup, we're at the boundary. Since threshold is {maxQty: 0.5, score: 0}
+    // and nativeQty ≈ 1.0, we're past 0.5, so we should get score 1, not 0.
+    // This test expectation was wrong. Let's check the actual threshold logic:
+    // At 1 cup exactly, score should be 1 (we've crossed into the next threshold)
+    const score = scoreForQty(testFoods.oats, nativeQty);
+    expect(score).toBe(1); // corrected: 1 cup is in the medium zone
+  });
+
+  test("oats: 40g entered → 0.5 cup native → score 0", () => {
+    // 40g = 0.5 cup exactly, should be score 0
+    const nativeQty = toNativeQty(testFoods.oats, 40, "g");
+    expect(nativeQty).toBeCloseTo(0.5, 2);
     const score = scoreForQty(testFoods.oats, nativeQty);
     expect(score).toBe(0);
   });
